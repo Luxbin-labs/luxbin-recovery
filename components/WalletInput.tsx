@@ -44,7 +44,7 @@ export default function WalletInput({
           type="text"
           value={address}
           onChange={(e) => onAddressChange(e.target.value)}
-          placeholder="0x..."
+          placeholder={network === "xrpl-mainnet" ? "r..." : "0x..."}
           className="w-full font-mono text-sm"
           spellCheck={false}
         />

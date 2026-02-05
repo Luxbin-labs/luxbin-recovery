@@ -16,7 +16,11 @@ export async function GET(request: NextRequest) {
   }
 
   // Basic address validation
-  if (network !== "solana-mainnet") {
+  if (network === "xrpl-mainnet") {
+    if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(address)) {
+      return NextResponse.json({ error: "Invalid XRP Ledger address (should start with 'r')" }, { status: 400 });
+    }
+  } else if (network !== "solana-mainnet") {
     if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
       return NextResponse.json({ error: "Invalid EVM wallet address" }, { status: 400 });
     }

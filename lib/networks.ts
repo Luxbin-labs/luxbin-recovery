@@ -43,6 +43,13 @@ export const SUPPORTED_NETWORKS: Network[] = [
     nativeCurrency: "SOL",
     decimals: 9,
   },
+  {
+    id: "xrpl-mainnet",
+    name: "XRP Ledger",
+    explorerUrl: "https://xrpscan.com",
+    nativeCurrency: "XRP",
+    decimals: 6,
+  },
 ];
 
 export function getNetwork(id: string): Network | undefined {

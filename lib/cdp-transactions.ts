@@ -30,12 +30,144 @@ function classifyTx(
   return "unknown";
 }
 
+// --- XRPL transaction fetching ---
+
+interface XrplTxResult {
+  tx_json?: {
+    hash: string;
+    Account: string;
+    Destination?: string;
+    Amount?: string | { value: string; currency: string; issuer: string };
+    TransactionType: string;
+    date?: number;
+  };
+  // Older API format
+  tx?: {
+    hash: string;
+    Account: string;
+    Destination?: string;
+    Amount?: string | { value: string; currency: string; issuer: string };
+    TransactionType: string;
+    date?: number;
+  };
+  meta?: {
+    TransactionResult: string;
+    delivered_amount?: string | { value: string; currency: string; issuer: string };
+  };
+  validated?: boolean;
+}
+
+async function fetchXrplTransactions(
+  address: string,
+  limit: number = 50
+): Promise<{ transactions: Transaction[]; hasMore: boolean }> {
+  const XRPL_RPC = "https://s1.ripple.com:51234/";
+
+  const body = {
+    method: "account_tx",
+    params: [
+      {
+        account: address,
+        ledger_index_min: -1,
+        ledger_index_max: -1,
+        limit,
+        forward: false,
+      },
+    ],
+  };
+
+  const res = await fetch(XRPL_RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+
+  if (data.result?.error) {
+    throw new Error(data.result.error_message || data.result.error);
+  }
+
+  const txs: XrplTxResult[] = data.result?.transactions || [];
+  const transactions: Transaction[] = [];
+
+  // XRPL epoch starts Jan 1, 2000 00:00:00 UTC (946684800 seconds after Unix epoch)
+  const RIPPLE_EPOCH = 946684800;
+
+  for (const entry of txs) {
+    const txData = entry.tx_json || entry.tx;
+    if (!txData) continue;
+
+    const txType = txData.TransactionType;
+    const hash = txData.hash;
+    const from = txData.Account || "";
+    const to = txData.Destination || "";
+    const date = txData.date
+      ? new Date((txData.date + RIPPLE_EPOCH) * 1000).toISOString()
+      : "";
+    const metaResult = entry.meta?.TransactionResult || "tesSUCCESS";
+
+    // Parse amount - can be drops (string) or issued currency (object)
+    let value = "0";
+    let asset = "XRP";
+    const rawAmount = entry.meta?.delivered_amount || txData.Amount;
+
+    if (typeof rawAmount === "string") {
+      // Native XRP in drops (1 XRP = 1,000,000 drops)
+      value = rawAmount;
+      asset = "XRP";
+    } else if (rawAmount && typeof rawAmount === "object") {
+      // Issued currency / token
+      // Convert to drops-equivalent for consistent display
+      const floatVal = parseFloat(rawAmount.value);
+      value = Math.round(floatVal * 1_000_000).toString();
+      asset = rawAmount.currency.length > 3
+        ? Buffer.from(rawAmount.currency, "hex").toString("utf-8").replace(/\0/g, "")
+        : rawAmount.currency;
+    }
+
+    // Classify
+    let type: "send" | "receive" | "contract" | "unknown" = "unknown";
+    if (txType === "Payment") {
+      if (from.toLowerCase() === address.toLowerCase()) type = "send";
+      else if (to.toLowerCase() === address.toLowerCase()) type = "receive";
+    } else {
+      type = "contract"; // OfferCreate, TrustSet, etc.
+    }
+
+    transactions.push({
+      hash,
+      from,
+      to,
+      value,
+      asset,
+      timestamp: date,
+      blockNumber: "",
+      network: "xrpl-mainnet",
+      type,
+      status: metaResult === "tesSUCCESS" ? "confirmed" : "failed",
+    });
+  }
+
+  return {
+    transactions,
+    hasMore: txs.length === limit,
+  };
+}
+
+// --- EVM transaction fetching ---
+
 export async function fetchTransactions(
   address: string,
   networkId: string,
   page: number = 1,
   pageSize: number = 50
 ): Promise<{ transactions: Transaction[]; hasMore: boolean }> {
+  // XRPL has its own fetch path
+  if (networkId === "xrpl-mainnet") {
+    return fetchXrplTransactions(address, pageSize);
+  }
+
   const explorer = getExplorerApi(networkId);
   const network = getNetwork(networkId);
 
